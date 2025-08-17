@@ -323,24 +323,76 @@ class YoutubeLoader(BaseLoader):
             - and more.
         """
         try:
-            from pytube import YouTube
-
+            from yt_dlp import YoutubeDL
         except ImportError:
             raise ImportError(
-                'Could not import "pytube" Python package. '
-                "Please install it with `pip install pytube`."
+                'Could not import "yt_dlp" Python package. '
+                'Please install it with `pip install yt-dlp`.'
             )
-        yt = YouTube(f"https://www.youtube.com/watch?v={self.video_id}")
+
+        url = f"https://www.youtube.com/watch?v={self.video_id}"
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            # Ensure we extract full info for a single video
+            "extract_flat": False,
+        }
+
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        # Map yt-dlp fields to expected output
+        title = info.get("title") or "Unknown"
+        description = info.get("description") or "Unknown"
+        view_count = info.get("view_count") or 0
+
+        # Determine thumbnail URL
+        thumbnail_url = info.get("thumbnail") or "Unknown"
+        if thumbnail_url == "Unknown":
+            thumbnails = info.get("thumbnails") or []
+            if thumbnails:
+                # Prefer the last (often highest quality), else first
+                thumbnail_url = (
+                    thumbnails[-1].get("url")
+                    or thumbnails[0].get("url")
+                    or "Unknown"
+                )
+
+        # Compute publish_date as "YYYY-MM-DD HH:MM:SS"
+        publish_date = "Unknown"
+        try:
+            from datetime import datetime, timezone
+
+            if info.get("release_timestamp"):
+                publish_date = datetime.fromtimestamp(
+                    info["release_timestamp"], tz=timezone.utc
+                ).strftime("%Y-%m-%d %H:%M:%S")
+            elif info.get("timestamp"):
+                publish_date = datetime.fromtimestamp(
+                    info["timestamp"], tz=timezone.utc
+                ).strftime("%Y-%m-%d %H:%M:%S")
+            elif info.get("upload_date") and isinstance(info.get("upload_date"), str):
+                ud = info["upload_date"]
+                if len(ud) == 8 and ud.isdigit():
+                    publish_date = f"{ud[0:4]}-{ud[4:6]}-{ud[6:8]} 00:00:00"
+        except Exception:
+            pass
+
+        # Duration in seconds
+        length = info.get("duration") or 0
+
+        # Author/uploader
+        author = info.get("uploader") or info.get("channel") or "Unknown"
+
         video_info = {
-            "title": yt.title or "Unknown",
-            "description": yt.description or "Unknown",
-            "view_count": yt.views or 0,
-            "thumbnail_url": yt.thumbnail_url or "Unknown",
-            "publish_date": yt.publish_date.strftime("%Y-%m-%d %H:%M:%S")
-            if yt.publish_date
-            else "Unknown",
-            "length": yt.length or 0,
-            "author": yt.author or "Unknown",
+            "title": title,
+            "description": description,
+            "view_count": view_count,
+            "thumbnail_url": thumbnail_url,
+            "publish_date": publish_date,
+            "length": length,
+            "author": author,
         }
         return video_info
 
